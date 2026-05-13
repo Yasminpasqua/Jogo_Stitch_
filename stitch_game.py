@@ -14,6 +14,14 @@ F_MID   = pygame.font.SysFont("Comic Sans MS", 20, bold=True)
 F_SM    = pygame.font.SysFont("Comic Sans MS", 15)
 F_XS    = pygame.font.SysFont("Comic Sans MS", 12)
 
+# ── PHASES ─────────────────────────────────────────────────────────────────────
+PHASES = [
+    {"id": 1, "obj": "hula",      "clue": "Encontre a Saia de Hula escondida na Casa!"},
+    {"id": 2, "obj": "xepa",      "clue": "Procure a Boneca Xepa no Quarto da Lilo!"},
+    {"id": 3, "obj": "ukulele",   "clue": "O Jumba sumiu com o Ukulele! Procure na Garagem!"},
+    {"id": 4, "obj": "surfboard", "clue": "Hora de surfar! Ache a Prancha na Praia!"}
+]
+
 # ── STITCH PALETTE ─────────────────────────────────────────────────────────────
 SM   = (88,  112, 175)   # main fur
 SD   = (52,  70,  132)   # dark shadow
@@ -162,10 +170,14 @@ def _load_obj_img(name):
             if _os.path.exists(path):
                 try:
                     img = pygame.image.load(path).convert_alpha()
-                    # Scale to a standard size for objects (approx 50-60px height)
-                    target_h = 60
-                    ratio = img.get_width() / img.get_height()
-                    _OBJ_CACHE[name] = pygame.transform.smoothscale(img, (int(target_h * ratio), target_h))
+                    if name == 'casa_ext.png':
+                        _OBJ_CACHE[name] = pygame.transform.smoothscale(img, (220, 200))
+                    elif name in ['casa_int.png', 'casa_kitchen.png', 'casa_bedroom.png']:
+                        _OBJ_CACHE[name] = pygame.transform.smoothscale(img, (W, H))
+                    else:
+                        target_h = 60
+                        ratio = img.get_width() / img.get_height()
+                        _OBJ_CACHE[name] = pygame.transform.smoothscale(img, (int(target_h * ratio), target_h))
                     return _OBJ_CACHE[name]
                 except: continue
         _OBJ_CACHE[name] = False
@@ -212,6 +224,9 @@ def draw_stitch(surf, cx, by, scale=1.0, moving=False, direction=1, frame=0, jum
     pygame.draw.ellipse(sh, (0, 0, 0, 40), (0, 0, int(iw * 0.72), 12))
     surf.blit(sh, (cx - int(iw * 0.36), by - 6))
     surf.blit(img, (cx - iw // 2, by - ih + bob_y))
+
+def draw_stitch_cam(surf, cx, by, cam_x=0, scale=1.0, moving=False, direction=1, frame=0, jumping=False):
+    draw_stitch(surf, cx - cam_x, by, scale, moving, direction, frame, jumping)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # COLLECTIBLE OBJECTS
@@ -331,35 +346,14 @@ def draw_pleakley(surf, cx, by, frame=0):
 # ═══════════════════════════════════════════════════════════════════════════════
 # BACKGROUNDS
 # ═══════════════════════════════════════════════════════════════════════════════
-def draw_hawaii(surf, t=0):
+def draw_hawaii(surf, t=0, offset_x=0):
     bg = _load_bg('fundo.png')
-    if not bg: bg = _load_bg('bg_beach.png')
-    
     if bg:
-        surf.blit(bg, (0, 0))
-
+        surf.blit(bg, (offset_x, 0))
     else:
         grad_fill(surf, (135, 206, 235), (255, 255, 255))
-        pygame.draw.rect(surf, (240, 215, 168), (0, H-120, W, 120))
-
-
-    # Improved Platforms - Tropical Wood Style
-    plats = [pygame.Rect(90,H-195,165,18),pygame.Rect(310,H-255,145,18),
-             pygame.Rect(525,H-215,165,18),pygame.Rect(725,H-280,140,18)]
-    for p in plats:
-        # Subtle outer glow for visibility
-        for g in range(4, 0, -1):
-            alpha_circle(surf, (255, 210, 0), (p.centerx, p.centery), p.width//2 + g*2, 20)
-        
-        # Main platform body (Dark tropical wood)
-        rrect(surf, (110, 70, 30), p, 8)
-        # Top highlight (Polished wood)
-        pygame.draw.rect(surf, (160, 110, 60), (p.x, p.y, p.w, 6), border_radius=8)
-        # Decorative flowers
-        for fx in range(p.x+15, p.right-15, 25):
-            pygame.draw.circle(surf, PINK, (fx, p.y+2), 4)
-            pygame.draw.circle(surf, YELLOW, (fx, p.y+2), 1.5)
-    return plats
+        pygame.draw.rect(surf, (238, 214, 175), (offset_x, H-60, W, 60))
+    return [pygame.Rect(offset_x, H-60, W, 60)]
 
 def draw_space(surf, stars, t=0):
     # Deep space gradient
@@ -398,26 +392,81 @@ def draw_space(surf, stars, t=0):
 # ═══════════════════════════════════════════════════════════════════════════════
 # HUD
 # ═══════════════════════════════════════════════════════════════════════════════
-def draw_hud(surf, lives, level, clue):
-    # Glass bar
-    rrect(surf,(20,20,80),(0,0,W,56),0,200)
-    pygame.draw.line(surf,(100,120,255),(0,56),(W,56),2)
-    # Hearts
+def draw_hud(surf, lives, level, clue, score=0, msg=""):
+    # Bottom Shadow Gradient
+    for i in range(80):
+        alpha = int((i/80.0) * 120)
+        pygame.draw.line(surf, (0,0,0,alpha), (0, H-i), (W, H-i))
+    
+    # HUD Bar Top
+    rrect(surf,(10,15,35),(10,10,W-20,46),15,180)
+    pygame.draw.rect(surf,(100,150,255),(10,10,W-20,46),2,border_radius=15)
+
     for i in range(lives):
-        hx = 14 + i*40
-        pygame.draw.circle(surf,(220,20,60),(hx+8,12),9)
-        pygame.draw.circle(surf,(220,20,60),(hx+24,12),9)
-        pygame.draw.polygon(surf,(220,20,60),[(hx+2,18),(hx+16,30),(hx+30,18)])
-        pygame.draw.circle(surf,(255,90,110),(hx+10,11),5)
-    # Level badge
-    rrect(surf,(60,40,160),(W//2-50,4,100,24),12,200)
-    lt = F_SM.render(f"Fase  {level}", True, GOLD)
-    surf.blit(lt,(W//2-lt.get_width()//2, 8))
-    # Clue
-    rrect(surf,(0,0,60),(0,56,W,26),0,180)
-    pygame.draw.line(surf,(80,100,200),(0,82),(W,82),1)
-    ct = F_SM.render(f"💡  {clue}", True, (220,240,255))
-    surf.blit(ct,(W//2-ct.get_width()//2, 60))
+        hx=30+i*35
+        pygame.draw.circle(surf,(220,20,60),(hx+8,25),8)
+        pygame.draw.circle(surf,(220,20,60),(hx+20,25),8)
+        pygame.draw.polygon(surf,(220,20,60),[(hx+2,30),(hx+14,40),(hx+26,30)])
+    
+    lt=F_MID.render(f"Objetivo {level}",True,GOLD)
+    surf.blit(lt,(W//2-lt.get_width()//2,18))
+    
+    sc=F_MID.render(f"⭐ {score}",True,GOLD)
+    surf.blit(sc,(W-sc.get_width()-35,18))
+    
+    # Interaction Key Prompt (Small floating 'E')
+    if msg:
+        tw = F_SM.render("E", True, BLACK)
+        bx, by = W//2 - 15, H-120
+        pygame.draw.circle(surf, GOLD, (bx+15, by+15), 18)
+        pygame.draw.circle(surf, WHITE, (bx+15, by+15), 15)
+        surf.blit(tw, (bx+15-tw.get_width()//2, by+15-tw.get_height()//2))
+        
+        lw = F_SM.render(msg, True, WHITE)
+        surf.blit(lw, (W//2-lw.get_width()//2, H-80))
+
+def draw_dialog(surf, text, name="Lilo"):
+    # RPG Style Dialog Box
+    dh = 120
+    rrect(surf, (10, 10, 30), (50, H-dh-20, W-100, dh), 15, 230)
+    pygame.draw.rect(surf, (100, 150, 255), (50, H-dh-20, W-100, dh), 3, border_radius=15)
+    
+    # Name Tag
+    rrect(surf, GOLD, (70, H-dh-35, 100, 30), 8)
+    nt = F_SM.render(name, True, BLACK)
+    surf.blit(nt, (120-nt.get_width()//2, H-dh-30))
+    
+    # Text wrapping
+    words = text.split()
+    lines = []
+    curr = ""
+    for w in words:
+        if len(curr + w) < 65: curr += w + " "
+        else: lines.append(curr); curr = w + " "
+    lines.append(curr)
+    
+    for i, l in enumerate(lines[:3]):
+        tt = F_MID.render(l.strip(), True, WHITE)
+        surf.blit(tt, (80, H-dh+5+i*30))
+    
+    prompt = F_XS.render("Pressione ESPAÇO para continuar", True, (150, 180, 255))
+    surf.blit(prompt, (W-100-prompt.get_width(), H-45))
+
+def draw_house_ext(surf, x, y):
+    img = _load_obj_img('casa_ext.png')
+    if img:
+        surf.blit(img, (x, y - img.get_height()))
+    else:
+        # Fallback if image fails
+        rrect(surf, (150, 100, 50), (x, y-120, 160, 120), 5)
+        pygame.draw.polygon(surf, (100, 50, 20), [(x-20, y-120), (x+80, y-180), (x+180, y-120)])
+
+def draw_interior(surf, room_type='casa_int.png', offset_x=0):
+    img = _load_obj_img(room_type)
+    if img:
+        surf.blit(img, (offset_x, 0))
+    else:
+        pygame.draw.rect(surf, (80, 60, 40), (offset_x, 0, W, H))
 
 def draw_overlay(surf, title, sub="", col=GOLD):
     s2 = pygame.Surface((W,H),pygame.SRCALPHA)
@@ -543,20 +592,24 @@ class Player:
         self.x=80.0; self.y=float(H-60); self.vx=0.0; self.vy=0.0
         self.on_ground=False; self.lives=3; self.inv=0; self.frame=0
         self.moving=False; self.facing=1; self.jumping=False
+        self.target_interact = None
+
 
     def rect(self):
         return pygame.Rect(int(self.x)-22, int(self.y)-88, 44, 88)
 
-    def update(self, platforms):
+    def update(self, platforms, room_width=W):
         keys=pygame.key.get_pressed()
         sp=4.8
         if   keys[pygame.K_LEFT]  or keys[pygame.K_a]: self.vx=-sp; self.facing=-1; self.moving=True
         elif keys[pygame.K_RIGHT] or keys[pygame.K_d]: self.vx= sp; self.facing= 1; self.moving=True
         else: self.vx*=0.75; self.moving=False
+
+        
         if (keys[pygame.K_SPACE] or keys[pygame.K_UP] or keys[pygame.K_w]) and self.on_ground:
             self.vy=-15; self.on_ground=False
         self.vy+=0.65; self.x+=self.vx; self.y+=self.vy
-        self.x=max(22,min(W-22,self.x))
+        self.x=max(22,min(room_width-22,self.x))
         self.on_ground=False; self.jumping=self.vy<0
         if self.y>=H-60: self.y=float(H-60); self.vy=0; self.on_ground=True
         r=self.rect()
@@ -566,14 +619,28 @@ class Player:
         if self.inv>0: self.inv-=1
         self.frame+=1
 
-    def draw(self, surf):
+    def draw(self, surf, cam_x=0):
         if self.inv>0 and (self.frame//4)%2==0: return
-        draw_stitch(surf, int(self.x), int(self.y), scale=1.06,
+        draw_stitch(surf, int(self.x - cam_x), int(self.y), scale=1.06,
                     moving=self.moving, direction=self.facing,
                     frame=self.frame, jumping=self.jumping)
 
     def hurt(self):
-        if self.inv==0: self.lives-=1; self.inv=90
+        if self.inv==0: 
+            self.lives-=1; self.inv=90
+
+class InteractivePoint:
+    def __init__(self, x, y, label, action='inspect', hidden_obj=None):
+        self.rect = pygame.Rect(x-40, y-100, 80, 100)
+        self.x = x; self.y = y
+        self.label = label
+        self.action = action
+        self.hidden_obj = hidden_obj
+
+    def draw(self, surf, cam_x=0):
+        pass # Hidden points are now just for portals or simple inspection
+
+
 
 
 class Obj:
@@ -585,130 +652,236 @@ class Obj:
 
     def update(self): self.anim+=1
 
-    def draw(self, surf):
+    def draw(self, surf, cam_x=0):
         if self.collected: return
         pulse=abs(math.sin(self.anim*0.06))
         col=GOLD if self.correct else (200,200,200)
-        alpha_circle(surf,col,(int(self.x),int(self.y)-26),int(22+pulse*8),60)
+        alpha_circle(surf,col,(int(self.x-cam_x),int(self.y)-26),int(15+pulse*5),40)
         fy=self.y+math.sin(self.anim*0.07)*5
-        if   self.kind=='hula':      draw_hula(surf,int(self.x),int(fy),self.anim)
-        elif self.kind=='ragdoll':   draw_ragdoll(surf,int(self.x),int(fy))
-        elif self.kind=='surfboard': draw_surfboard(surf,int(self.x),int(fy))
-        elif self.kind=='ukelele':   draw_ukelele(surf,int(self.x),int(fy))
-
+        if   self.kind=='hula':      draw_hula(surf,int(self.x-cam_x),int(fy),self.anim)
+        elif self.kind=='ragdoll' or self.kind=='xepa': draw_ragdoll(surf,int(self.x-cam_x),int(fy))
+        elif self.kind=='surfboard' or self.kind=='prancha': draw_surfboard(surf,int(self.x-cam_x),int(fy))
+        elif self.kind=='ukelele' or self.kind=='ukulele':   draw_ukelele(surf,int(self.x-cam_x),int(fy))
+        lbl = F_XS.render(self.kind.title(), True, WHITE)
+        surf.blit(lbl, (self.x - cam_x - lbl.get_width()//2, fy - 80))
 
 class Enemy:
-    SPEEDS={'gantu':1.8,'jumba':1.3,'pleakley':2.5}
+    SPEEDS={'gantu':1.5,'jumba':1.0,'pleakley':2.2}
+    CHASE_SPEEDS={'gantu':2.2,'jumba':1.8,'pleakley':2.8}
+    
     def __init__(self,x,y,kind,dir=1):
         self.x=float(x); self.y=float(y); self.kind=kind; self.dir=dir
         self.speed=self.SPEEDS[kind]; self.frame=0
+        self.state = 'patrol' # 'patrol' or 'chase'
+        self.detect_range = 140
+        self.detect_timer = 0 # Countdown before chasing
+
+
+
     def rect(self): return pygame.Rect(int(self.x)-24,int(self.y)-78,48,78)
-    def update(self,lb,rb):
+    
+    def update(self,lb,rb, player_x=None):
+        can_see = player_x and abs(self.x - player_x) < self.detect_range
+        
+        if can_see:
+            self.detect_timer = min(30, self.detect_timer + 1)
+        else:
+            self.detect_timer = max(0, self.detect_timer - 1)
+
+        if self.detect_timer >= 20: # Must see for ~20 frames
+            self.state = 'chase'
+            self.dir = 1 if player_x > self.x else -1
+            self.speed = self.CHASE_SPEEDS[self.kind]
+        else:
+            self.state = 'patrol'
+            self.speed = self.SPEEDS[self.kind]
+
         self.x+=self.speed*self.dir
-        if self.x<lb or self.x>rb: self.dir*=-1
+        if self.state == 'patrol':
+            if self.x<lb or self.x>rb: self.dir*=-1
         self.frame+=1
-    def draw(self,surf):
-        if   self.kind=='gantu':    draw_gantu(surf,int(self.x),int(self.y),self.frame)
-        elif self.kind=='jumba':    draw_jumba(surf,int(self.x),int(self.y),self.frame)
-        elif self.kind=='pleakley': draw_pleakley(surf,int(self.x),int(self.y),self.frame)
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# LEVEL CONFIG
-# ═══════════════════════════════════════════════════════════════════════════════
-def build_level(lvl):
-    if lvl==1:
-        clue="Qual dança havaiana Lilo adora praticar? Ache o objeto!"
-        objs=[Obj(165,H-210,'surfboard',False),
-              Obj(385,H-272,'hula',True),
-              Obj(605,H-232,'ukelele',False)]
-        enes=[Enemy(280,H-60,'gantu',1),Enemy(560,H-60,'pleakley',-1)]
-    else:
-        clue="Qual é o brinquedo favorito de Lilo? Encontre-o!"
-        objs=[Obj(150,H-192,'ukelele',False),
-              Obj(380,H-258,'surfboard',False),
-              Obj(608,H-214,'ragdoll',True)]
-        enes=[Enemy(250,H-60,'jumba',1),Enemy(480,H-60,'gantu',-1),Enemy(730,H-60,'pleakley',1)]
-    return clue,objs,enes
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# MAIN LOOP
-# ═══════════════════════════════════════════════════════════════════════════════
+    def draw(self, surf, cam_x=0):
+        if self.state == 'chase':
+            alpha = int(155 + 100 * math.sin(self.frame * 0.2))
+            pygame.draw.circle(surf, (255, 0, 0, alpha), (int(self.x-cam_x), int(self.y-100)), 12)
+            lbl = F_XS.render("!", True, WHITE)
+            surf.blit(lbl, (self.x-cam_x-lbl.get_width()//2, self.y-108))
+        elif self.detect_timer > 0:
+            # Yellow warning meter
+            pygame.draw.circle(surf, YELLOW, (int(self.x-cam_x), int(self.y-100)), int(4 + self.detect_timer//3))
+
+        if   self.kind=='gantu':    draw_gantu(surf,int(self.x-cam_x),int(self.y),self.frame)
+
+        elif self.kind=='jumba':    draw_jumba(surf,int(self.x-cam_x),int(self.y),self.frame)
+        elif self.kind=='pleakley': draw_pleakley(surf,int(self.x-cam_x),int(self.y),self.frame)
+
+# ── ROOM SYSTEM ────────────────────────────────────────────────────────────────
+class Portal:
+    def __init__(self, x, y, w, h, target_room, target_pos, label="ENTRAR"):
+        self.rect = pygame.Rect(x, y, w, h)
+        self.target_room = target_room
+        self.target_pos = target_pos
+        self.label = label
+
+class Room:
+    def __init__(self, name, bg_type, objects, enemies, portals, platforms, interactives=[], width=W):
+        self.name = name
+        self.bg_type = bg_type
+        self.objects = objects
+        self.enemies = enemies
+        self.portals = portals
+        self.platforms = platforms
+        self.interactives = interactives
+        self.width = width
+
+def build_adventure():
+    rooms = {
+        'island': Room('Ilha Tropical', 'hawaii', [], 
+                     [Enemy(550, H-60, 'gantu', 1), Enemy(1100, H-60, 'pleakley', -1)], 
+                     [Portal(320, H-150, 100, 150, 'house_entrance', (100, H-100), "ENTRAR NA CASA")],
+                     [pygame.Rect(600,H-195,165,18)],
+                     interactives=[],
+                     width=W*2),
+        
+        'house_entrance': Room('Sala da Lilo', ['casa_int.png'], 
+                      [Obj(400, H-60, 'hula', True), Obj(150, H-60, 'ragdoll', False), Obj(700, H-60, 'ukelele', False)], 
+                      [], 
+                      [Portal(10, 0, 80, H, 'island', (320, H-100), "SAIR"),
+                       Portal(W-90, 0, 80, H, 'house_kitchen', (100, H-100), "COZINHA")],
+                      [pygame.Rect(350, H-160, 200, 18), pygame.Rect(100, H-220, 150, 18), 
+                       pygame.Rect(600, H-250, 200, 18)],
+                      interactives=[],
+                      width=W),
+
+        'house_kitchen': Room('Cozinha', ['casa_kitchen.png'], 
+                      [Obj(700, H-60, 'ukelele', True), Obj(300, H-180, 'hula', False), Obj(100, H-60, 'prancha', False)], 
+                      [], 
+                      [Portal(10, 0, 80, H, 'house_entrance', (W-150, H-100), "SALA"),
+                       Portal(W-90, 0, 80, H, 'house_bedroom', (100, H-100), "QUARTO")],
+                      [pygame.Rect(300, H-180, 250, 20), pygame.Rect(650, H-250, 150, 18),
+                       pygame.Rect(0, H-200, 180, 18)],
+                      interactives=[],
+                      width=W),
+                      
+        'house_bedroom': Room('Quarto da Lilo', ['casa_bedroom.png'], 
+                      [Obj(300, H-220, 'xepa', True), Obj(600, H-60, 'ragdoll', False), Obj(150, H-60, 'hula', False)], 
+                      [], 
+                      [Portal(10, 0, 80, H, 'house_kitchen', (W-150, H-100), "COZINHA")],
+                      [pygame.Rect(200, H-220, 200, 20), pygame.Rect(500, H-150, 180, 18),
+                       pygame.Rect(750, H-280, 150, 18)],
+                      interactives=[],
+                      width=W),
+    }
+    return rooms
+
 def main():
     random.seed(99)
-    stars=[(random.randint(0,W),random.randint(0,H-80),random.randint(100,200),random.randint(1,2))
-           for _ in range(130)]
-    state='title'; level=1; frame=0
-    player=Player(); clue,objs,enes=build_level(1)
-    particles=[]; wrong_timer=0
+    state='title'; frame=0; score=0
+    player=Player()
+    rooms = build_adventure()
+    current_room_key = 'island'
+    level = 1
+    clue = PHASES[level-1]["clue"]
+    particles=[]; flash_timer=0; flash_col=(255,0,0)
+    dialog_text = ""; dialog_active = False
+    cam_x = 0
 
     while True:
-        clock.tick(FPS); frame+=1
+        dt=clock.tick(FPS); frame+=1
+        room = rooms[current_room_key]
+        hud_msg = ""
+        
+        target_cam_x = player.x - W//2
+        target_cam_x = max(0, min(target_cam_x, room.width - W))
+        cam_x += (target_cam_x - cam_x) * 0.1
+
         for ev in pygame.event.get():
             if ev.type==pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type==pygame.KEYDOWN:
                 if ev.key==pygame.K_ESCAPE: pygame.quit(); sys.exit()
                 if state=='title' and ev.key==pygame.K_RETURN:
-                    state='play'; level=1; player=Player()
-                    clue,objs,enes=build_level(1); particles=[]
-                elif state=='levelup' and ev.key==pygame.K_RETURN:
-                    level=2; player=Player()
-                    clue,objs,enes=build_level(2); particles=[]; state='play'
-                elif state in ('win','gameover') and ev.key==pygame.K_RETURN:
-                    state='title'
+                    state='play'; score=0
+                    dialog_text = "Stitch! Encontre os objetos da Ohana. Nem tudo é o que parece ser!"
+                    dialog_active = True
+                elif state in('win','gameover') and ev.key==pygame.K_RETURN:
+                    state='title'; player=Player(); level=1; current_room_key='island'
+                
+                if dialog_active and ev.key==pygame.K_SPACE:
+                    dialog_active = False
+                
+                if state=='play' and not dialog_active and ev.key==pygame.K_e:
+                    for p in room.portals:
+                        if player.rect().colliderect(p.rect):
+                            current_room_key = p.target_room
+                            player.x, player.y = p.target_pos
+                            cam_x = player.x - W//2
+                            break
 
-        # ── SCREENS ──────────────────────────────────────────────────────────
         if state=='title':    draw_title(screen,frame); pygame.display.flip(); continue
         if state=='win':      draw_win(screen,frame);   pygame.display.flip(); continue
         if state=='gameover': draw_gameover(screen,frame); pygame.display.flip(); continue
-        if state=='levelup':
-            plats = draw_hawaii(screen,frame) if level==1 else draw_space(screen,stars,frame)
-            draw_overlay(screen,"🌟 FASE 1 CONCLUÍDA!","Saia de Hula encontrada! Próxima: Espaço! 🚀",GOLD)
-            pygame.display.flip(); continue
 
-        # ── PLAY ─────────────────────────────────────────────────────────────
-        if level==1: plats=draw_hawaii(screen,frame)
-        else:        plats=draw_space(screen,stars,frame)
+        if room.bg_type == 'hawaii': 
+            for i in range(2): 
+                draw_hawaii(screen, frame, offset_x=i*W - cam_x)
+            draw_house_ext(screen, 320 - cam_x, H-60)
+        else:
+            for i, bg in enumerate(room.bg_type):
+                draw_interior(screen, bg, offset_x=i*W - cam_x)
+            s = pygame.Surface((W, H), pygame.SRCALPHA)
+            pygame.draw.rect(s, (30, 20, 0, 40), (0, 0, W, H))
+            screen.blit(s, (0,0))
 
-        # Update & draw objects
-        for obj in objs: obj.update(); obj.draw(screen)
-        # Update & draw enemies
-        for en in enes:
-            en.update(28, W-28); en.draw(screen)
+        for p in room.portals:
+            if player.rect().colliderect(p.rect):
+                hud_msg = p.label
+
+        for obj in room.objects[:]:
+            obj.update(); obj.draw(screen, cam_x)
+            if not obj.collected and player.rect().colliderect(obj.rect()):
+                if obj.kind == PHASES[level-1]["obj"]:
+                    obj.collected = True
+                    score += 500
+                    level += 1
+                    flash_timer = 30
+                    if level > len(PHASES):
+                        state = 'win'
+                    else:
+                        if level == 2: current_room_key = 'house_bedroom'; player.x, player.y = 100, H-100
+                        elif level == 3: current_room_key = 'house_kitchen'; player.x, player.y = 100, H-100
+                        elif level == 4: current_room_key = 'island'; player.x, player.y = 80, H-60
+                        
+                        cam_x = player.x - W//2
+                        dialog_text = f"MUITO BEM! Você achou! Próxima missão: {PHASES[level-1]['clue']}"
+                        dialog_active = True
+                        clue = PHASES[level-1]["clue"]
+                else:
+                    dialog_text = f"Humm... {obj.kind.title()} não é o que estamos procurando. Continue tentando!"
+                    dialog_active = True
+                    player.x -= player.facing * 50
+
+        for en in room.enemies:
+            en.update(50, room.width-50, player_x=player.x); en.draw(screen, cam_x)
             if player.rect().colliderect(en.rect()):
                 player.hurt()
                 if player.lives<=0: state='gameover'
 
-        # Player
-        player.update(plats); player.draw(screen)
+        if not dialog_active:
+            player.update(room.platforms, room_width=room.width)
+        player.draw(screen, cam_x)
 
-        # Collect check
-        for obj in objs:
-            if not obj.collected and player.rect().colliderect(obj.rect()):
-                obj.collected=True
-                for _ in range(22):
-                    particles.append(Particle(obj.x,obj.y-26,GOLD if obj.correct else (200,80,80)))
-                if obj.correct:
-                    state='levelup' if level==1 else 'win'
-                else:
-                    player.hurt(); wrong_timer=80
-                    if player.lives<=0: state='gameover'
+        if flash_timer>0:
+            flash_timer-=1
+            sf=pygame.Surface((W,H),pygame.SRCALPHA)
+            sf.fill((255,215,0,flash_timer*8)); screen.blit(sf,(0,0))
 
-        # Particles
-        for p in particles[:]:
-            p.update(); p.draw(screen)
-            if p.life<=0: particles.remove(p)
-
-        # HUD
-        draw_hud(screen, player.lives, level, clue)
-
-        # Wrong object message
-        if wrong_timer>0:
-            wrong_timer-=1
-            ms=F_MID.render("❌  Objeto errado! Tome cuidado!", True, (255,80,80))
-            rrect(screen,(50,0,0),(W//2-ms.get_width()//2-10,H//2-20,ms.get_width()+20,36),8,180)
-            screen.blit(ms,(W//2-ms.get_width()//2,H//2-16))
-
+        draw_hud(screen, player.lives, level, clue, score, hud_msg)
+        if dialog_active: draw_dialog(screen, dialog_text, "Lilo")
         pygame.display.flip()
 
 if __name__=='__main__':
     main()
+
+
