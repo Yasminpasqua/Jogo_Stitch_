@@ -3,7 +3,8 @@ import os as _os
 
 pygame.init()
 
-W, H = 900, 600
+HUD_H = 50
+W, H  = 900, 600 + HUD_H
 screen = pygame.display.set_mode((W, H))
 pygame.display.set_caption("Stitch: Labirinto Ohana")
 clock = pygame.time.Clock()
@@ -14,13 +15,14 @@ F_TITLE = pygame.font.SysFont("Comic Sans MS", 40, bold=True)
 F_BIG   = pygame.font.SysFont("Comic Sans MS", 28, bold=True)
 F_MID   = pygame.font.SysFont("Comic Sans MS", 20, bold=True)
 F_SM    = pygame.font.SysFont("Comic Sans MS", 15)
+F_Q     = pygame.font.SysFont("Comic Sans MS", 18, bold=True)
 
-# ── PHASES ─────────────────────────────────────────────────────────────────────
+# ── PHASES (perguntas trivia sobre o filme) ────────────────────────────────────
 PHASES = [
-    {"id": 1, "obj": "hula",      "clue": "Encontre a Saia de Hula escondida!"},
-    {"id": 2, "obj": "xepa",      "clue": "Ache a Boneca Xepa, cuidado com os inimigos!"},
-    {"id": 3, "obj": "ukulele",   "clue": "O Jumba perdeu o Ukulele no labirinto!"},
-    {"id": 4, "obj": "prancha", "clue": "Pegue a Prancha e escape!"}
+    {"id": 1, "obj": "hula",    "clue": "Qual roupa Lilo usa na apresentação de dança?"},
+    {"id": 2, "obj": "xepa",    "clue": "Qual o nome da boneca de pano da Lilo?"},
+    {"id": 3, "obj": "ukulele", "clue": "Qual instrumento Stitch aprende a tocar?"},
+    {"id": 4, "obj": "prancha", "clue": "Com o que Nani e David surfam no mar?"}
 ]
 
 # ── COLORS ────────────────────────────────────────────────────────────────────
@@ -30,7 +32,7 @@ WALL_C = (30, 50, 150); DOT_C = (255, 200, 150)
 
 TILE = 30
 COLS = W // TILE
-ROWS = H // TILE
+ROWS = 20  # linhas fixas do mapa
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # ASSETS
@@ -63,13 +65,12 @@ def get_img(name, target_size=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAZE LAYOUT
 # ═══════════════════════════════════════════════════════════════════════════════
-
 MAZE_MAP = [
     "##############################",
     "#............##............#O#",
     "#.####.#####.##.#####.####.#.#",
     "#O####.#####.##.#####.####.#.#",
-    "#..........................#.#",
+    "#.............................#",
     "#.####.##.########.##.####.#.#",
     "#......##....##....##......#.#",
     "######.##### ## #####.######.#",
@@ -83,17 +84,21 @@ MAZE_MAP = [
     "#.####.#####.##.#####.####.#.#",
     "#O..##.......S........##..O#.#",
     "###.##.##.########.##.##.###.#",
-    "#......##..........##......#.#",
+    "#......##..........##........#",
     "##############################"
 ]
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# PLAYER (com animação de caminhada realista)
+# ═══════════════════════════════════════════════════════════════════════════════
 class PacPlayer:
     def __init__(self, cx, cy):
         self.x = cx * TILE + TILE//2
-        self.y = cy * TILE + TILE//2
+        self.y = cy * TILE + TILE//2 + HUD_H
         self.speed = 3
         self.dx = 0; self.dy = 0
         self.frame = 0
+        self.anim_timer = 0.0
         self.lives = 3
         self.facing = 'right'
 
@@ -113,10 +118,10 @@ class PacPlayer:
                 self.x += self.dx
                 self.y += self.dy
                 self.frame += 1
+                self.anim_timer += 0.25
                 if self.dx > 0: self.facing = 'right'
                 elif self.dx < 0: self.facing = 'left'
             else:
-                # Corner sliding logic to prevent getting stuck
                 if self.dx != 0:
                     if not self.check_collision(self.dx, -self.speed, walls): self.y -= self.speed
                     elif not self.check_collision(self.dx, self.speed, walls): self.y += self.speed
@@ -124,7 +129,6 @@ class PacPlayer:
                     if not self.check_collision(-self.speed, self.dy, walls): self.x -= self.speed
                     elif not self.check_collision(self.speed, self.dy, walls): self.x += self.speed
 
-        # Wrap around screen
         if self.x < 0: self.x = W
         if self.x > W: self.x = 0
 
@@ -135,16 +139,55 @@ class PacPlayer:
         return False
 
     def draw(self, surf):
-        img = get_img('stitch.png', (TILE+10, TILE+10))
-        if self.facing == 'left': img = pygame.transform.flip(img, True, False)
-        
-        bob = math.sin(self.frame * 0.4) * 3 if (self.dx!=0 or self.dy!=0) else 0
-        surf.blit(img, (self.x - TILE//2 - 5, self.y - TILE//2 - 5 + bob))
+        sz = (TILE + 10, TILE + 10)
+        base_img = get_img('stitch.png', sz)
+        if self.facing == 'left':
+            base_img = pygame.transform.flip(base_img, True, False)
 
+        moving = (self.dx != 0 or self.dy != 0)
+
+        if moving:
+            # ── Ciclo de caminhada realista ──
+            # Fase do passo (0 a 2*PI = 1 passo completo)
+            t = self.anim_timer
+            step_phase = t % (2 * math.pi)
+
+            # 1) Bounce vertical — sobe no meio do passo, desce no contato
+            #    abs(sin) dá dois "contatos" por ciclo
+            bounce = -abs(math.sin(step_phase)) * 4
+
+            # 2) Waddle — balanço lateral como o Stitch anda no filme
+            waddle_angle = math.sin(step_phase) * 8
+
+            # 3) Squash & Stretch — achata no contato, estica no ar
+            contact = abs(math.cos(step_phase))  # 1 = contato, 0 = ar
+            stretch_y = 1.0 + contact * 0.08      # até 1.08x mais alto
+            squash_x  = 1.0 - contact * 0.06      # até 0.94x mais largo
+
+            # Aplicar squash/stretch redimensionando
+            new_w = max(1, int(sz[0] * squash_x))
+            new_h = max(1, int(sz[1] * stretch_y))
+            img = pygame.transform.smoothscale(base_img, (new_w, new_h))
+
+            # Aplicar waddle (rotação)
+            img = pygame.transform.rotate(img, waddle_angle)
+
+            # Posicionar centralizado com bounce
+            r = img.get_rect(center=(self.x, self.y + bounce))
+            surf.blit(img, r)
+        else:
+            # Parado — idle com respiração suave
+            breath = math.sin(self.frame * 0.05) * 1.5
+            r = base_img.get_rect(center=(self.x, self.y + breath))
+            surf.blit(base_img, r)
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# GHOST (Gantu persegue, Jumba e Pleakley aleatórios)
+# ═══════════════════════════════════════════════════════════════════════════════
 class Ghost:
     def __init__(self, cx, cy, kind):
         self.x = cx * TILE + TILE//2
-        self.y = cy * TILE + TILE//2
+        self.y = cy * TILE + TILE//2 + HUD_H
         self.speed = 2
         self.dx = self.speed; self.dy = 0
         self.kind = kind
@@ -155,45 +198,89 @@ class Ghost:
     def rect(self):
         return pygame.Rect(self.x - 12, self.y - 14, 24, 28)
 
-    def update(self, walls):
+    def update(self, walls, player_pos=None):
         self.frame += 1
-        
+
         # Sync dx/dy to current speed
         if self.dx > 0: self.dx = self.speed
         elif self.dx < 0: self.dx = -self.speed
         if self.dy > 0: self.dy = self.speed
         elif self.dy < 0: self.dy = -self.speed
 
-        # Try to move
+        is_chaser = (self.kind == 'gantu' and player_pos is not None)
+
+        cx = int(self.x) % TILE
+        cy = int(self.y - HUD_H) % TILE
+
+        # Se estiver no centro do tile (margem de erro para garantir)
+        if 14 <= cx <= 16 and 14 <= cy <= 16:
+            # Alinha perfeitamente ao centro para evitar travamentos
+            grid_x = int(self.x) // TILE
+            grid_y = int(self.y - HUD_H) // TILE
+            self.x = grid_x * TILE + TILE//2
+            self.y = grid_y * TILE + TILE//2 + HUD_H
+
+            def is_open(test_dx, test_dy):
+                step_x = (test_dx / self.speed) * TILE
+                step_y = (test_dy / self.speed) * TILE
+                return not self.check_collision(step_x, step_y, walls)
+
+            possible = []
+            all_dirs = [(self.speed, 0), (-self.speed, 0), (0, self.speed), (0, -self.speed)]
+            opp_dir = (-self.dx, -self.dy)
+
+            for ddx, ddy in all_dirs:
+                if (ddx, ddy) == opp_dir:
+                    continue  # Fantasma não dá meia-volta (regra do Pac-Man)
+                if is_open(ddx, ddy):
+                    possible.append((ddx, ddy))
+
+            if not possible:
+                # Beco sem saída: única opção é dar meia-volta
+                if is_open(opp_dir[0], opp_dir[1]):
+                    possible.append(opp_dir)
+
+            if possible:
+                if len(possible) > 1:
+                    # Interseção: decide o caminho
+                    if is_chaser:
+                        px, py = player_pos
+                        scored = []
+                        for ddx, ddy in possible:
+                            # Avalia a distância a partir do PRÓXIMO tile
+                            next_x = self.x + (ddx / self.speed) * TILE
+                            next_y = self.y + (ddy / self.speed) * TILE
+                            dist = math.hypot(next_x - px, next_y - py)
+                            scored.append((dist, ddx, ddy))
+                        
+                        scored.sort(key=lambda t: t[0])
+                        # 90% das vezes escolhe o melhor caminho, 10% aleatório para não prender
+                        if random.random() < 0.90:
+                            self.dx, self.dy = scored[0][1], scored[0][2]
+                        else:
+                            _, ddx, ddy = random.choice(scored)
+                            self.dx, self.dy = ddx, ddy
+                    else:
+                        self.dx, self.dy = random.choice(possible)
+                else:
+                    # Apenas um caminho livre (curva ou reta)
+                    self.dx, self.dy = possible[0]
+            else:
+                self.dx = 0
+                self.dy = 0
+
+        # Movimenta se não for bater (segurança adicional)
         if not self.check_collision(self.dx, self.dy, walls):
             self.x += self.dx
             self.y += self.dy
-            
-            # Randomly turn if roughly aligned with grid
-            if int(self.x) % TILE in (14, 15, 16) and int(self.y) % TILE in (14, 15, 16):
-                if random.random() < 0.05: # 5% chance to try turning
-                    possible = []
-                    for ddx, ddy in [(self.speed,0), (-self.speed,0), (0,self.speed), (0,-self.speed)]:
-                        if not self.check_collision(ddx, ddy, walls):
-                            possible.append((ddx, ddy))
-                    if possible:
-                        self.dx, self.dy = random.choice(possible)
         else:
-            # Hit a wall, must pick a new direction
-            possible = []
-            for ddx, ddy in [(self.speed,0), (-self.speed,0), (0,self.speed), (0,-self.speed)]:
-                if not self.check_collision(ddx, ddy, walls):
-                    possible.append((ddx, ddy))
-            if possible:
-                # snap to grid center to prevent clipping
-                self.x = (int(self.x) // TILE) * TILE + TILE//2
-                self.y = (int(self.y) // TILE) * TILE + TILE//2
-                self.dx, self.dy = random.choice(possible)
-            else:
-                self.dx = -self.dx
-                self.dy = -self.dy
+            # Fallback caso bata numa parede por erro de arredondamento
+            self.dx = -self.dx
+            self.dy = -self.dy
+            self.x += self.dx
+            self.y += self.dy
 
-        # Wrap
+        # Wrap na tela (túneis)
         if self.x < 0: self.x = W
         if self.x > W: self.x = 0
 
@@ -210,10 +297,13 @@ class Ghost:
         pygame.draw.circle(surf, WHITE, (self.x-5, self.y-5+bob), 4)
         pygame.draw.circle(surf, WHITE, (self.x+5, self.y-5+bob), 4)
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# OBJECTS (sem glow)
+# ═══════════════════════════════════════════════════════════════════════════════
 class BigObject:
     def __init__(self, cx, cy, kind, is_correct):
         self.x = cx * TILE + TILE//2
-        self.y = cy * TILE + TILE//2
+        self.y = cy * TILE + TILE//2 + HUD_H
         self.kind = kind
         self.is_correct = is_correct
         self.rect = pygame.Rect(self.x - 15, self.y - 15, 30, 30)
@@ -223,13 +313,11 @@ class BigObject:
         self.frame += 1
         bob = math.sin(self.frame * 0.1) * 4
         img = get_img(f"{self.kind}.png", (40, 40))
-        
-        # Glow effect
-        if self.is_correct:
-            pygame.draw.circle(surf, (255, 215, 0, 100), (self.x, self.y+bob), 20)
-            
         surf.blit(img, (self.x - 20, self.y - 20 + bob))
 
+# ═══════════════════════════════════════════════════════════════════════════════
+# LEVEL BUILDER
+# ═══════════════════════════════════════════════════════════════════════════════
 class GameLevel:
     def __init__(self, level):
         self.walls = []
@@ -239,27 +327,26 @@ class GameLevel:
         self.player_start = (0,0)
         self.level = level
         self.score = 0
-        
         self.build()
-        
+
     def build(self):
         phase_info = PHASES[min(self.level-1, len(PHASES)-1)]
         correct_kind = phase_info['obj']
-        
+
         # Possible decoys
         all_decoys = ['hula', 'xepa', 'ukulele', 'prancha']
         decoys = [d for d in all_decoys if d != correct_kind]
-        
+
         obj_spots = []
         ghost_names = ['gantu', 'jumba', 'pleakley']
         g_idx = 0
-        
+
         for row in range(ROWS):
             for col in range(COLS):
                 char = MAZE_MAP[row][col]
                 x = col * TILE
-                y = row * TILE
-                
+                y = row * TILE + HUD_H
+
                 if char == '#':
                     self.walls.append(pygame.Rect(x, y, TILE, TILE))
                 elif char == '.':
@@ -286,14 +373,9 @@ class GameLevel:
 # ═══════════════════════════════════════════════════════════════════════════════
 def draw_ui(surf, state, found_obj, score, lives, level, clue):
     if state == 'title':
-        surf.fill((10,30,100))
-        img = get_img('stitch.png', (200, 200))
-        surf.blit(img, (W//2 - 100, 150))
-        tl = F_TITLE.render("STITCH: LABIRINTO PAC-MAN", True, GOLD)
-        surf.blit(tl, (W//2-tl.get_width()//2, 80))
-        sc = F_MID.render("▶ ENTER para jogar ◀", True, WHITE)
-        surf.blit(sc, (W//2-sc.get_width()//2, 400))
-        
+        img = get_img('introlabirinto.png', (W, H))
+        surf.blit(img, (0, 0))
+
     elif state == 'gameover':
         img = get_img('gameover.png', (W, H))
         surf.blit(img, (0, 0))
@@ -301,7 +383,7 @@ def draw_ui(surf, state, found_obj, score, lives, level, clue):
         surf.blit(tl, (W//2-tl.get_width()//2, 100))
         m = F_SM.render("Pressione ENTER para tentar novamente", True, WHITE)
         surf.blit(m, (W//2-m.get_width()//2, H-50))
-        
+
     elif state == 'win':
         surf.fill((5,30,80))
         img = get_img('stitch.png', (300, 300))
@@ -310,12 +392,12 @@ def draw_ui(surf, state, found_obj, score, lives, level, clue):
         surf.blit(tl, (W//2-tl.get_width()//2, 100))
         m = F_SM.render("Pressione ENTER para jogar novamente", True, WHITE)
         surf.blit(m, (W//2-m.get_width()//2, H-50))
-        
+
     elif state == 'found':
         surf.fill((20,100,50))
         img = get_img(f"{found_obj}.png", (150, 150))
         surf.blit(img, (W//2 - 75, 100))
-        tl = F_TITLE.render("OBJETO ENCONTRADO!", True, GOLD)
+        tl = F_TITLE.render("RESPOSTA CERTA!", True, GOLD)
         surf.blit(tl, (W//2-tl.get_width()//2, 300))
         t2 = F_MID.render(f"Você pegou: {found_obj.title()}", True, WHITE)
         surf.blit(t2, (W//2-t2.get_width()//2, 400))
@@ -323,14 +405,24 @@ def draw_ui(surf, state, found_obj, score, lives, level, clue):
         surf.blit(t3, (W//2-t3.get_width()//2, 500))
 
     elif state == 'play':
-        # HUD bar at the top or bottom
-        pygame.draw.rect(surf, (0,0,0,150), (0, 0, W, 40))
+        # HUD bar — fundo escuro acima do labirinto
+        pygame.draw.rect(surf, (10, 15, 60), (0, 0, W, HUD_H))
+        pygame.draw.line(surf, (50, 100, 200), (0, HUD_H-1), (W, HUD_H-1), 2)
+
+        # Lives
         for i in range(lives):
-            pygame.draw.circle(surf, RED, (30 + i*25, 20), 8)
+            pygame.draw.circle(surf, RED, (20 + i*22, 14), 7)
+
+        # Score
         sc = F_SM.render(f"Score: {score}", True, WHITE)
-        surf.blit(sc, (120, 10))
-        cl = F_SM.render(f"Missão {level}: {clue}", True, GOLD)
-        surf.blit(cl, (300, 10))
+        surf.blit(sc, (90, 6))
+
+        # Trivia question — destaque com fundo
+        q_text = f"Fase {level}: {clue}"
+        cl = F_Q.render(q_text, True, GOLD)
+        qx = W//2 - cl.get_width()//2
+        pygame.draw.rect(surf, (20, 30, 90), (qx - 10, 26, cl.get_width() + 20, 22), border_radius=6)
+        surf.blit(cl, (qx, 26))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAIN LOOP
@@ -344,30 +436,30 @@ def main():
     flash_timer = 0
     flash_msg = ""
     found_obj = ""
-    
+
     def reset_positions():
         player.x = lvl.player_start[0]*TILE + TILE//2
-        player.y = lvl.player_start[1]*TILE + TILE//2
+        player.y = lvl.player_start[1]*TILE + TILE//2 + HUD_H
         player.dx = 0; player.dy = 0
         for e in lvl.enemies:
             e.x = e.start_x; e.y = e.start_y
-    
+
     while True:
         clock.tick(FPS)
-        
+
         for ev in pygame.event.get():
             if ev.type == pygame.QUIT: pygame.quit(); sys.exit()
             if ev.type == pygame.KEYDOWN:
                 if ev.key == pygame.K_ESCAPE: pygame.quit(); sys.exit()
-                
+
                 if state == 'title' and ev.key == pygame.K_RETURN:
                     state = 'play'; level_num = 1; total_score = 0
                     lvl = GameLevel(level_num)
                     player = PacPlayer(*lvl.player_start)
-                    
+
                 elif state in ('win', 'gameover') and ev.key == pygame.K_RETURN:
                     state = 'title'
-                    
+
                 elif state == 'found' and ev.key == pygame.K_RETURN:
                     state = 'play'
                     level_num += 1
@@ -375,27 +467,27 @@ def main():
                         state = 'win'
                     else:
                         lvl = GameLevel(level_num)
-                        # Carry over lives and score
                         old_lives = player.lives
                         player = PacPlayer(*lvl.player_start)
                         player.lives = old_lives
-                        
+
         if state in ('title', 'gameover', 'win', 'found'):
             draw_ui(screen, state, found_obj, 0, 0, 0, "")
             pygame.display.flip(); continue
 
-        # PLAY STATE
-        # Draw background and walls
+        # ── PLAY STATE ─────────────────────────────────────────────────────────
         screen.fill(BLACK)
+
+        # Walls
         for w in lvl.walls:
             pygame.draw.rect(screen, WALL_C, w, border_radius=4)
             pygame.draw.rect(screen, (50, 100, 200), w, 2, border_radius=4)
-            
-        # Draw Dots
+
+        # Dots
         for d in lvl.dots:
             pygame.draw.rect(screen, DOT_C, d)
-            
-        # Update and Draw Objects
+
+        # Objects
         for o in lvl.objects:
             o.draw(screen)
             if player.rect().colliderect(o.rect):
@@ -406,16 +498,16 @@ def main():
                 else:
                     player.lives -= 1
                     flash_timer = 30
-                    flash_msg = "Objeto Falso! Perdeu 1 vida!"
+                    flash_msg = "Resposta Errada! Perdeu 1 vida!"
                     lvl.objects.remove(o)
                     if player.lives <= 0: state = 'gameover'
                     else: reset_positions()
 
-        # Update and Draw Enemies
+        # Enemies — pass player position so Gantu can chase
+        player_pos = (player.x, player.y)
         for e in lvl.enemies:
-            # Increase enemy speed slightly based on level
             e.speed = 2 + (level_num * 0.5)
-            e.update(lvl.walls)
+            e.update(lvl.walls, player_pos)
             e.draw(screen)
             if player.rect().colliderect(e.rect()):
                 player.lives -= 1
@@ -424,11 +516,11 @@ def main():
                 if player.lives <= 0: state = 'gameover'
                 else: reset_positions()
 
-        # Update and Draw Player
+        # Player
         player.update(lvl.walls)
         player.draw(screen)
-        
-        # Check Dot collisions
+
+        # Dot collisions
         p_rect = player.rect()
         new_dots = []
         for d in lvl.dots:
@@ -439,8 +531,9 @@ def main():
         lvl.dots = new_dots
 
         # UI & Effects
-        draw_ui(screen, state, "", total_score, player.lives, level_num, PHASES[level_num-1]['clue'])
-        
+        draw_ui(screen, state, "", total_score, player.lives, level_num,
+                PHASES[level_num-1]['clue'])
+
         if flash_timer > 0:
             flash_timer -= 1
             sf = pygame.Surface((W,H), pygame.SRCALPHA)
