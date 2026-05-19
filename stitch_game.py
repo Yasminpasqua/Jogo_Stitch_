@@ -14,20 +14,18 @@ F_TITLE = pygame.font.SysFont("Comic Sans MS", 40, bold=True)
 F_BIG   = pygame.font.SysFont("Comic Sans MS", 28, bold=True)
 F_MID   = pygame.font.SysFont("Comic Sans MS", 20, bold=True)
 F_SM    = pygame.font.SysFont("Comic Sans MS", 15)
-F_XS    = pygame.font.SysFont("Comic Sans MS", 12)
 
 # ── PHASES ─────────────────────────────────────────────────────────────────────
 PHASES = [
     {"id": 1, "obj": "hula",      "clue": "Encontre a Saia de Hula escondida!"},
     {"id": 2, "obj": "xepa",      "clue": "Ache a Boneca Xepa, cuidado com os inimigos!"},
     {"id": 3, "obj": "ukulele",   "clue": "O Jumba perdeu o Ukulele no labirinto!"},
-    {"id": 4, "obj": "surfboard", "clue": "Pegue a Prancha e escape!"}
+    {"id": 4, "obj": "prancha", "clue": "Pegue a Prancha e escape!"}
 ]
 
 # ── COLORS ────────────────────────────────────────────────────────────────────
 WHITE  = (255,255,255); BLACK = (0,0,0); RED = (220,50,50)
-GOLD   = (255,210,0);   PINK  = (255,105,180); TEAL = (0,180,180)
-ORANGE = (255,140,0);   YELLOW= (255,215,0);   LIME = (140,220,0)
+GOLD   = (255,210,0);   LIME = (140,220,0)
 WALL_C = (30, 50, 150); DOT_C = (255, 200, 150)
 
 TILE = 30
@@ -65,31 +63,7 @@ def get_img(name, target_size=None):
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAZE LAYOUT
 # ═══════════════════════════════════════════════════════════════════════════════
-MAZE_MAP = [
-    "##############################",
-    "#............##............#O#",
-    "#.####.#####.##.#####.####.#.#",
-    "#O####.#####.##.#####.####.#.#",
-    "#.####.#####.##.#####.####.#.#",
-    "#..........................#.#",
-    "#.####.##.########.##.####.#.#",
-    "#.####.##.########.##.####.#.#",
-    "#......##....##....##......#.#",
-    "######.##### ## #####.######.#",
-    "     #.#####    #####.#     .#",
-    "######.##### ## #####.######.#",
-    "#      ##   E  E   ##      #.#",
-    "######.## ######## ##.######.#",
-    "     #.## ######## ##.#     .#",
-    "######.##          ##.######.#",
-    "#............##............#.#",
-    "#.####.#####.##.#####.####.#.#",
-    "#O..##.......S........##..O#.#",
-    "###.##.##.########.##.##.###.#",
-    "#......##..........##......#.#",
-    "##############################"
-]
-# Adjusting to exactly 20 rows
+
 MAZE_MAP = [
     "##############################",
     "#............##............#O#",
@@ -119,7 +93,6 @@ class PacPlayer:
         self.y = cy * TILE + TILE//2
         self.speed = 3
         self.dx = 0; self.dy = 0
-        self.next_dx = 0; self.next_dy = 0
         self.frame = 0
         self.lives = 3
         self.facing = 'right'
@@ -274,7 +247,7 @@ class GameLevel:
         correct_kind = phase_info['obj']
         
         # Possible decoys
-        all_decoys = ['hula', 'xepa', 'ukulele', 'surfboard']
+        all_decoys = ['hula', 'xepa', 'ukulele', 'prancha']
         decoys = [d for d in all_decoys if d != correct_kind]
         
         obj_spots = []
