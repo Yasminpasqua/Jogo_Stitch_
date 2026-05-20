@@ -22,7 +22,8 @@ PHASES = [
     {"id": 1, "obj": "hula",    "clue": "Qual roupa Lilo usa na apresentação de dança?"},
     {"id": 2, "obj": "xepa",    "clue": "Qual o nome da boneca de pano da Lilo?"},
     {"id": 3, "obj": "ukulele", "clue": "Qual instrumento Stitch aprende a tocar?"},
-    {"id": 4, "obj": "prancha", "clue": "Com o que Nani e David surfam no mar?"}
+    {"id": 4, "obj": "prancha", "clue": "Com o que Nani e David surfam no mar?"},
+    {"id": 5, "obj": "saida",   "clue": "Nível Assustador! Encontre a SAÍDA no escuro!"}
 ]
 
 # ── COLORS ────────────────────────────────────────────────────────────────────
@@ -61,6 +62,23 @@ def get_img(name, target_size=None):
         s = pygame.Surface(target_size if target_size else (TILE, TILE), pygame.SRCALPHA)
         IMG_CACHE[(name, target_size)] = s
         return s
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AUDIO
+# ═══════════════════════════════════════════════════════════════════════════════
+AUDIO_CACHE = {}
+
+def play_audio(name):
+    base_dir = _os.path.dirname(_os.path.abspath(__file__))
+    path = _os.path.join(base_dir, 'inicial', 'audios', name)
+    if _os.path.exists(path):
+        try:
+            pygame.mixer.music.load(path)
+            pygame.mixer.music.play()
+        except Exception as e:
+            print("Erro ao tocar áudio:", e)
+    else:
+        print("Áudio não encontrado:", path)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAZE LAYOUT
@@ -200,6 +218,8 @@ class Ghost:
 
     def update(self, walls, player_pos=None):
         self.frame += 1
+        if self.speed == 0:
+            return
 
         # Sync dx/dy to current speed
         if self.dx > 0: self.dx = self.speed
@@ -312,8 +332,15 @@ class BigObject:
     def draw(self, surf):
         self.frame += 1
         bob = math.sin(self.frame * 0.1) * 4
-        img = get_img(f"{self.kind}.png", (40, 40))
-        surf.blit(img, (self.x - 20, self.y - 20 + bob))
+        if self.kind == 'saida':
+            r = pygame.Rect(self.x - 20, self.y - 20 + bob, 40, 40)
+            pygame.draw.rect(surf, (150, 50, 200), r, border_radius=8)
+            pygame.draw.rect(surf, WHITE, r, 2, border_radius=8)
+            t = F_SM.render("SAÍDA", True, WHITE)
+            surf.blit(t, (self.x - t.get_width()//2, self.y - 10 + bob))
+        else:
+            img = get_img(f"{self.kind}.png", (40, 40))
+            surf.blit(img, (self.x - 20, self.y - 20 + bob))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # LEVEL BUILDER
@@ -340,6 +367,7 @@ class GameLevel:
         obj_spots = []
         ghost_names = ['gantu', 'jumba', 'pleakley']
         g_idx = 0
+        empty_spots = []
 
         for row in range(ROWS):
             for col in range(COLS):
@@ -351,22 +379,36 @@ class GameLevel:
                     self.walls.append(pygame.Rect(x, y, TILE, TILE))
                 elif char == '.':
                     self.dots.append(pygame.Rect(x + TILE//2 - 2, y + TILE//2 - 2, 4, 4))
+                    empty_spots.append((col, row))
                 elif char == 'S':
                     self.player_start = (col, row)
                 elif char == 'E':
-                    if g_idx < len(ghost_names):
+                    if self.level == 5:
+                        pass # Na fase 5, espalhamos os fantasmas aleatoriamente depois
+                    elif g_idx < len(ghost_names):
                         self.enemies.append(Ghost(col, row, ghost_names[g_idx]))
                         g_idx += 1
                 elif char == 'O':
                     obj_spots.append((col, row))
 
+        if self.level == 5:
+            fixed_traps = [(1, 14), (14, 18), (28, 14), (8, 4), (21, 4), (1, 6), (14, 1)]
+            for i, (c, r) in enumerate(fixed_traps):
+                g = Ghost(c, r, 'gantu')
+                g.jumpscare_img = 'susto1' if i % 2 == 0 else 'susto2'
+                self.enemies.append(g)
+
         # Assign correct and fake objects to 'O' spots randomly
         random.shuffle(obj_spots)
-        for i, spot in enumerate(obj_spots):
-            if i == 0:
-                self.objects.append(BigObject(spot[0], spot[1], correct_kind, True))
-            else:
-                self.objects.append(BigObject(spot[0], spot[1], random.choice(decoys), False))
+        if self.level == 5:
+            # Phase 5: Only exit, no decoys
+            self.objects.append(BigObject(obj_spots[0][0], obj_spots[0][1], 'saida', True))
+        else:
+            for i, spot in enumerate(obj_spots):
+                if i == 0:
+                    self.objects.append(BigObject(spot[0], spot[1], correct_kind, True))
+                else:
+                    self.objects.append(BigObject(spot[0], spot[1], random.choice(decoys), False))
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # RENDER MENUS
@@ -435,6 +477,7 @@ def main():
     lvl = None
     flash_timer = 0
     flash_msg = ""
+    jumpscare_img = ""
     found_obj = ""
 
     def reset_positions():
@@ -506,18 +549,30 @@ def main():
         # Enemies — pass player position so Gantu can chase
         player_pos = (player.x, player.y)
         for e in lvl.enemies:
-            e.speed = 2 + (level_num * 0.5)
-            e.update(lvl.walls, player_pos)
-            e.draw(screen)
-            if player.rect().colliderect(e.rect()):
+            if level_num == 5:
+                e.speed = 0 # Monstros são armadilhas estáticas
+            else:
+                e.speed = 2 + (level_num * 0.5)
+            if flash_timer == 0:
+                e.update(lvl.walls, player_pos)
+            if level_num != 5:
+                e.draw(screen)
+            if player.rect().colliderect(e.rect()) and flash_timer == 0:
                 player.lives -= 1
-                flash_timer = 30
-                flash_msg = "Pego por um Inimigo!"
-                if player.lives <= 0: state = 'gameover'
-                else: reset_positions()
+                if level_num == 5:
+                    flash_timer = 60 # 1 segundo de jumpscare
+                    flash_msg = ""
+                    jumpscare_img = getattr(e, 'jumpscare_img', 'susto1')
+                    play_audio('susto.mp3')
+                else:
+                    flash_timer = 30
+                    flash_msg = "Pego por um Inimigo!"
+                    jumpscare_img = ""
+                reset_positions()
 
         # Player
-        player.update(lvl.walls)
+        if flash_timer == 0:
+            player.update(lvl.walls)
         player.draw(screen)
 
         # Dot collisions
@@ -530,17 +585,34 @@ def main():
                 new_dots.append(d)
         lvl.dots = new_dots
 
+        # Se for a fase 5, desenhar escuridão com luz no Stitch
+        if level_num == 5:
+            dark = pygame.Surface((W, H))
+            dark.fill((0, 0, 0))
+            # Usar magenta como cor de recorte para criar o buraco de luz menor
+            pygame.draw.circle(dark, (255, 0, 255), (int(player.x), int(player.y)), 40)
+            dark.set_colorkey((255, 0, 255))
+            screen.blit(dark, (0, 0))
+
         # UI & Effects
         draw_ui(screen, state, "", total_score, player.lives, level_num,
                 PHASES[level_num-1]['clue'])
 
         if flash_timer > 0:
             flash_timer -= 1
-            sf = pygame.Surface((W,H), pygame.SRCALPHA)
-            sf.fill((255,0,0,flash_timer*5)); screen.blit(sf,(0,0))
-            if flash_msg:
-                fm = F_BIG.render(flash_msg, True, WHITE)
-                screen.blit(fm, (W//2-fm.get_width()//2, H//2))
+            if jumpscare_img and level_num == 5:
+                big_img = get_img(f"{jumpscare_img}.png", (W, H))
+                screen.blit(big_img, (0, 0))
+            else:
+                sf = pygame.Surface((W,H), pygame.SRCALPHA)
+                sf.fill((255,0,0,flash_timer*5)); screen.blit(sf,(0,0))
+                if flash_msg:
+                    fm = F_BIG.render(flash_msg, True, WHITE)
+                    screen.blit(fm, (W//2-fm.get_width()//2, H//2))
+            
+            # Checar gameover só depois que o susto/flash acabar
+            if flash_timer == 0 and player.lives <= 0:
+                state = 'gameover'
 
         pygame.display.flip()
 
