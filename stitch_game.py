@@ -38,6 +38,73 @@ ROWS = 20  # linhas fixas do mapa
 # ASSETS
 # ═══════════════════════════════════════════════════════════════════════════════
 IMG_CACHE = {}
+SPRITE_BG_CACHE = {}
+
+def remove_background(surf, tolerance=40):
+    """Remove a cor de fundo usando numpy.
+    Detecta o fundo por amostragem da borda completa e usa flood-fill."""
+    import numpy as np
+    from collections import deque
+    surf = surf.convert_alpha()
+    w, h = surf.get_size()
+    if w == 0 or h == 0:
+        return surf
+
+    # Amostra TODA a borda (1 pixel de espessura) para detectar a cor de fundo mais comum
+    rgb = pygame.surfarray.pixels3d(surf)
+    border_pixels = []
+    # Bordas horizontais (topo e base)
+    for x in range(0, w, max(1, w//30)):
+        border_pixels.append(tuple(rgb[x, 0, :3]))
+        border_pixels.append(tuple(rgb[x, h-1, :3]))
+    # Bordas verticais (esquerda e direita)
+    for y in range(0, h, max(1, h//30)):
+        border_pixels.append(tuple(rgb[0, y, :3]))
+        border_pixels.append(tuple(rgb[w-1, y, :3]))
+
+    # Agrupa por faixas de 30 para encontrar a cor dominante na borda
+    from collections import Counter
+    def quantize(c): return (c[0]//30*30, c[1]//30*30, c[2]//30*30)
+    counted = Counter(quantize(p) for p in border_pixels)
+    bg_q = counted.most_common(1)[0][0]
+    br, bg_g, bb = int(bg_q[0] + 15), int(bg_q[1] + 15), int(bg_q[2] + 15)
+
+    # Máscara booleana: pixels parecidos com o fundo
+    mask = (
+        (np.abs(rgb[:, :, 0].astype(np.int32) - br)  <= tolerance) &
+        (np.abs(rgb[:, :, 1].astype(np.int32) - bg_g) <= tolerance) &
+        (np.abs(rgb[:, :, 2].astype(np.int32) - bb)  <= tolerance)
+    )
+    del rgb  # libera lock
+
+    # Flood-fill iniciando de TODOS os pixels da borda que batem com o fundo
+    flood = np.zeros((w, h), dtype=bool)
+    q = deque()
+
+    def seed(x, y):
+        if 0 <= x < w and 0 <= y < h and mask[x, y] and not flood[x, y]:
+            flood[x, y] = True
+            q.append((x, y))
+
+    for x in range(w):
+        seed(x, 0); seed(x, h-1)
+    for y in range(h):
+        seed(0, y); seed(w-1, y)
+
+    while q:
+        px, py = q.popleft()
+        for nx, ny in ((px+1,py),(px-1,py),(px,py+1),(px,py-1)):
+            if 0 <= nx < w and 0 <= ny < h and not flood[nx,ny] and mask[nx,ny]:
+                flood[nx, ny] = True
+                q.append((nx, ny))
+
+    # Aplica transparência nos pixels de fundo
+    new_surf = surf.copy()
+    alpha = pygame.surfarray.pixels_alpha(new_surf)
+    alpha[flood] = 0
+    del alpha
+    return new_surf
+
 
 def get_img(name, target_size=None):
     if (name, target_size) in IMG_CACHE:
@@ -62,6 +129,143 @@ def get_img(name, target_size=None):
         IMG_CACHE[(name, target_size)] = s
         return s
 
+
+def get_sprite_sheet(name):
+    """Carrega um sprite sheet sem processamento (apenas cache raw)."""
+    if name in SPRITE_BG_CACHE:
+        return SPRITE_BG_CACHE[name]
+    base_dir = _os.path.dirname(_os.path.abspath(__file__))
+    path = _os.path.join(base_dir, 'inicial', 'imagens', name)
+    if not _os.path.exists(path):
+        SPRITE_BG_CACHE[name] = None
+        return None
+    try:
+        img = pygame.image.load(path).convert_alpha()
+        SPRITE_BG_CACHE[name] = img
+        return img
+    except:
+        SPRITE_BG_CACHE[name] = None
+        return None
+
+FRAME_CACHE = {}
+
+def get_frame_nobg(sheet, rect, tolerance=45):
+    """Recorta um frame do sheet e remove o fundo. Resultado é cacheado."""
+    key = (id(sheet), rect.x, rect.y, rect.w, rect.h)
+    if key in FRAME_CACHE:
+        return FRAME_CACHE[key]
+    frame = pygame.Surface((rect.w, rect.h), pygame.SRCALPHA)
+    frame.blit(sheet, (0, 0), rect)
+    result = remove_background(frame, tolerance)
+    FRAME_CACHE[key] = result
+    return result
+
+
+def preload_enemy_sprites():
+    """Pré-carrega todos os frames dos inimigos antes do jogo começar.
+    Exibe uma tela de loading enquanto processa."""
+
+    TOTAL_FRAMES = 20  # 8 Gantu + 6 Jumba + 6 Pleakley
+    done = [0]
+
+    # Carrega imagem de fundo do loading
+    bg_loading = get_img('iniciando.png', (W, H))
+
+    def show_loading(progress):
+        """progress: float de 0.0 a 1.0"""
+        # Fundo
+        screen.blit(bg_loading, (0, 0))
+
+        # Overlay escuro semitransparente no centro para destacar o texto
+        overlay = pygame.Surface((W, 180), pygame.SRCALPHA)
+        overlay.fill((5, 8, 30, 180))
+        screen.blit(overlay, (0, H//2 - 60))
+
+        # Título "Iniciando o jogo"
+        titulo = F_BIG.render("Iniciando o jogo", True, WHITE)
+        screen.blit(titulo, (W//2 - titulo.get_width()//2, H//2 - 42))
+
+        # Barra de progresso
+        bar_w = int(W * 0.55)
+        bar_h = 22
+        bar_x = W//2 - bar_w//2
+        bar_y = H//2 + 10
+
+        # Fundo da barra
+        pygame.draw.rect(screen, (20, 25, 70), (bar_x - 2, bar_y - 2, bar_w + 4, bar_h + 4), border_radius=12)
+        pygame.draw.rect(screen, (35, 45, 110), (bar_x, bar_y, bar_w, bar_h), border_radius=10)
+
+        # Preenchimento dourado
+        fill_w = max(0, int(bar_w * progress))
+        if fill_w > 0:
+            pygame.draw.rect(screen, (200, 150, 0), (bar_x, bar_y, fill_w, bar_h), border_radius=10)
+            pygame.draw.rect(screen, GOLD,          (bar_x, bar_y, fill_w, bar_h // 2), border_radius=10)
+
+        # Borda da barra
+        pygame.draw.rect(screen, GOLD, (bar_x, bar_y, bar_w, bar_h), 2, border_radius=10)
+
+        # Percentual
+        pct = F_SM.render(f"{int(progress * 100)}%", True, WHITE)
+        screen.blit(pct, (W//2 - pct.get_width()//2, bar_y + bar_h + 8))
+
+        pygame.display.flip()
+        # Processa eventos do SO para não travar (não coloca na fila)
+        pygame.event.pump()
+
+    show_loading(0.0)
+
+    # ── Gantu (sprint1.png): 8 frames em grid 2×4, fundo branco, sem header ──
+    sheet1 = get_sprite_sheet('sprint1.png')
+    if sheet1:
+        sw, sh = sheet1.get_size()
+        fw = sw // 2
+        fh = sh // 4
+        for idx in range(8):
+            col = idx % 2
+            row = idx // 2
+            rect = pygame.Rect(col * fw, row * fh, fw, fh)
+            get_frame_nobg(sheet1, rect, tolerance=30)
+            done[0] += 1
+            show_loading(done[0] / TOTAL_FRAMES)
+
+    # ── Jumba (sprint2.png): linhas 0 e 2 (3+3 frames, linha 1 é irregular) ──
+    sheet2 = get_sprite_sheet('sprint2.png')
+    if sheet2:
+        sw, sh = sheet2.get_size()
+        fw = sw // 3
+        fh = sh // 3
+        for pos in range(6):
+            if pos < 3:
+                col, row = pos, 0
+            else:
+                col, row = pos - 3, 2
+            rect = pygame.Rect(col * fw, row * fh, fw, fh)
+            get_frame_nobg(sheet2, rect, tolerance=30)
+            done[0] += 1
+            show_loading(done[0] / TOTAL_FRAMES)
+
+    # ── Pleakley (sprint3.png): 6 frames em 1 linha ──
+    sheet3 = get_sprite_sheet('sprint3.png')
+    if sheet3:
+        sw, sh = sheet3.get_size()
+        fw = sw // 6
+        for idx in range(6):
+            rect = pygame.Rect(idx * fw, 0, fw, sh)
+            get_frame_nobg(sheet3, rect, tolerance=30)
+            done[0] += 1
+            show_loading(done[0] / TOTAL_FRAMES)
+
+    # Mostra 100% por meio segundo usando loop de eventos (não bloqueia)
+    show_loading(1.0)
+    t_end = pygame.time.get_ticks() + 500
+    while pygame.time.get_ticks() < t_end:
+        show_loading(1.0)
+        pygame.time.delay(30)
+
+    # Limpa TODOS os eventos acumulados durante o loading
+    pygame.event.clear()
+
+
 # ═══════════════════════════════════════════════════════════════════════════════
 # MAZE LAYOUT
 # ═══════════════════════════════════════════════════════════════════════════════
@@ -70,7 +274,7 @@ MAZE_MAP = [
     "#............##............#O#",
     "#.####.#####.##.#####.####.#.#",
     "#O####.#####.##.#####.####.#.#",
-    "#.............................#",
+    "#............................#",
     "#.####.##.########.##.####.#.#",
     "#......##....##....##......#.#",
     "######.##### ## #####.######.#",
@@ -147,36 +351,20 @@ class PacPlayer:
         moving = (self.dx != 0 or self.dy != 0)
 
         if moving:
-            # ── Ciclo de caminhada realista ──
-            # Fase do passo (0 a 2*PI = 1 passo completo)
             t = self.anim_timer
             step_phase = t % (2 * math.pi)
-
-            # 1) Bounce vertical — sobe no meio do passo, desce no contato
-            #    abs(sin) dá dois "contatos" por ciclo
             bounce = -abs(math.sin(step_phase)) * 4
-
-            # 2) Waddle — balanço lateral como o Stitch anda no filme
             waddle_angle = math.sin(step_phase) * 8
-
-            # 3) Squash & Stretch — achata no contato, estica no ar
-            contact = abs(math.cos(step_phase))  # 1 = contato, 0 = ar
-            stretch_y = 1.0 + contact * 0.08      # até 1.08x mais alto
-            squash_x  = 1.0 - contact * 0.06      # até 0.94x mais largo
-
-            # Aplicar squash/stretch redimensionando
+            contact = abs(math.cos(step_phase))
+            stretch_y = 1.0 + contact * 0.08
+            squash_x  = 1.0 - contact * 0.06
             new_w = max(1, int(sz[0] * squash_x))
             new_h = max(1, int(sz[1] * stretch_y))
             img = pygame.transform.smoothscale(base_img, (new_w, new_h))
-
-            # Aplicar waddle (rotação)
             img = pygame.transform.rotate(img, waddle_angle)
-
-            # Posicionar centralizado com bounce
             r = img.get_rect(center=(self.x, self.y + bounce))
             surf.blit(img, r)
         else:
-            # Parado — idle com respiração suave
             breath = math.sin(self.frame * 0.05) * 1.5
             r = base_img.get_rect(center=(self.x, self.y + breath))
             surf.blit(base_img, r)
@@ -186,8 +374,8 @@ class PacPlayer:
 # ═══════════════════════════════════════════════════════════════════════════════
 class Ghost:
     def __init__(self, cx, cy, kind):
-        self.x = cx * TILE + TILE//2
-        self.y = cy * TILE + TILE//2 + HUD_H
+        self.x = float(cx * TILE + TILE//2)
+        self.y = float(cy * TILE + TILE//2 + HUD_H)
         self.speed = 2
         self.dx = self.speed; self.dy = 0
         self.kind = kind
@@ -198,104 +386,149 @@ class Ghost:
     def rect(self):
         return pygame.Rect(self.x - 12, self.y - 14, 24, 28)
 
-    def update(self, walls, player_pos=None):
+    def update(self, walls, player_pos=None, other_enemies=None):
         self.frame += 1
 
-        # Sync dx/dy to current speed
-        if self.dx > 0: self.dx = self.speed
+        # Normaliza velocidade
+        if   self.dx > 0: self.dx =  self.speed
         elif self.dx < 0: self.dx = -self.speed
-        if self.dy > 0: self.dy = self.speed
+        if   self.dy > 0: self.dy =  self.speed
         elif self.dy < 0: self.dy = -self.speed
 
         is_chaser = (self.kind == 'gantu' and player_pos is not None)
 
+        # Posição dentro do tile (0 a TILE-1)
         cx = int(self.x) % TILE
         cy = int(self.y - HUD_H) % TILE
 
-        # Se estiver no centro do tile (margem de erro para garantir)
+        # Só toma decisão no centro do tile (janela de 3px)
         if 14 <= cx <= 16 and 14 <= cy <= 16:
-            # Alinha perfeitamente ao centro para evitar travamentos
             grid_x = int(self.x) // TILE
             grid_y = int(self.y - HUD_H) // TILE
-            self.x = grid_x * TILE + TILE//2
-            self.y = grid_y * TILE + TILE//2 + HUD_H
+            self.x = float(grid_x * TILE + TILE // 2)
+            self.y = float(grid_y * TILE + TILE // 2 + HUD_H)
 
             def is_open(test_dx, test_dy):
                 step_x = (test_dx / self.speed) * TILE
                 step_y = (test_dy / self.speed) * TILE
-                return not self.check_collision(step_x, step_y, walls)
+                return not self.check_collision(step_x, step_y, walls, other_enemies)
 
-            possible = []
             all_dirs = [(self.speed, 0), (-self.speed, 0), (0, self.speed), (0, -self.speed)]
-            opp_dir = (-self.dx, -self.dy)
+            opp_dir  = (-self.dx, -self.dy)
 
-            for ddx, ddy in all_dirs:
-                if (ddx, ddy) == opp_dir:
-                    continue  # Fantasma não dá meia-volta (regra do Pac-Man)
-                if is_open(ddx, ddy):
-                    possible.append((ddx, ddy))
+            possible = [d for d in all_dirs if d != opp_dir and is_open(d[0], d[1])]
 
             if not possible:
-                # Beco sem saída: única opção é dar meia-volta
                 if is_open(opp_dir[0], opp_dir[1]):
-                    possible.append(opp_dir)
+                    possible = [opp_dir]
 
             if possible:
-                if len(possible) > 1:
-                    # Interseção: decide o caminho
-                    if is_chaser:
-                        px, py = player_pos
-                        scored = []
-                        for ddx, ddy in possible:
-                            # Avalia a distância a partir do PRÓXIMO tile
-                            next_x = self.x + (ddx / self.speed) * TILE
-                            next_y = self.y + (ddy / self.speed) * TILE
-                            dist = math.hypot(next_x - px, next_y - py)
-                            scored.append((dist, ddx, ddy))
-                        
-                        scored.sort(key=lambda t: t[0])
-                        # 90% das vezes escolhe o melhor caminho, 10% aleatório para não prender
-                        if random.random() < 0.90:
-                            self.dx, self.dy = scored[0][1], scored[0][2]
-                        else:
-                            _, ddx, ddy = random.choice(scored)
-                            self.dx, self.dy = ddx, ddy
-                    else:
-                        self.dx, self.dy = random.choice(possible)
-                else:
-                    # Apenas um caminho livre (curva ou reta)
+                if len(possible) == 1:
                     self.dx, self.dy = possible[0]
+                elif is_chaser:
+                    px, py = player_pos
+                    scored = []
+                    for ddx, ddy in possible:
+                        nx = self.x + (ddx / self.speed) * TILE
+                        ny = self.y + (ddy / self.speed) * TILE
+                        scored.append((math.hypot(nx - px, ny - py), ddx, ddy))
+                    scored.sort()
+                    if random.random() < 0.90:
+                        self.dx, self.dy = scored[0][1], scored[0][2]
+                    else:
+                        _, ddx, ddy = random.choice(scored)
+                        self.dx, self.dy = ddx, ddy
+                else:
+                    self.dx, self.dy = random.choice(possible)
             else:
-                self.dx = 0
-                self.dy = 0
+                # Sem saída: reverte
+                self.dx = -self.dx
+                self.dy = -self.dy
 
-        # Movimenta se não for bater (segurança adicional)
-        if not self.check_collision(self.dx, self.dy, walls):
+        # Move somente se não bater na parede nem em outro inimigo
+        if not self.check_collision(self.dx, self.dy, walls, other_enemies):
             self.x += self.dx
             self.y += self.dy
-        else:
-            # Fallback caso bata numa parede por erro de arredondamento
+        elif other_enemies and self.check_collision(self.dx, self.dy, [], other_enemies):
+            # Se trombou de frente com outro inimigo no meio do caminho, inverte para se soltar
             self.dx = -self.dx
             self.dy = -self.dy
-            self.x += self.dx
-            self.y += self.dy
 
-        # Wrap na tela (túneis)
-        if self.x < 0: self.x = W
-        if self.x > W: self.x = 0
+        # Wrap horizontal (túneis)
+        if self.x < 0:       self.x = float(W)
+        elif self.x > float(W): self.x = 0.0
 
-    def check_collision(self, dx, dy, walls):
+    def check_collision(self, dx, dy, walls, other_enemies=None):
         rect = pygame.Rect(self.x + dx - 10, self.y + dy - 10, 20, 20)
         for w in walls:
             if rect.colliderect(w): return True
+        if other_enemies:
+            for other in other_enemies:
+                if rect.colliderect(other.rect()): return True
         return False
 
+
+    def _get_sprite_frame(self):
+        """Extrai o frame correto do sprite sheet com remoção de fundo por frame."""
+        if self.kind == 'gantu':
+            # sprint1.png: 8 frames em grid 2 colunas x 4 linhas
+            # Topo tem título de ~10% da altura; ignorar
+            sheet = get_sprite_sheet('sprint1.png')
+            if sheet is None: return None
+            sw, sh = sheet.get_size()
+            # Grid 2×4, fundo branco, sem header
+            fw = sw // 2
+            fh = sh // 4
+            idx = (self.frame // 6) % 8
+            col = idx % 2
+            row = idx // 2
+            rect = pygame.Rect(col * fw, row * fh, fw, fh)
+            return get_frame_nobg(sheet, rect, tolerance=30)
+
+        elif self.kind == 'jumba':
+            # sprint2.png: linhas 0 e 2 têm 3 cols cada (linha 1 tem 4 - irregular)
+            sheet = get_sprite_sheet('sprint2.png')
+            if sheet is None: return None
+            sw, sh = sheet.get_size()
+            fw = sw // 3
+            fh = sh // 3
+            # Alterna entre linha 0 (idx 0-2) e linha 2 (idx 3-5)
+            pos = (self.frame // 8) % 6
+            if pos < 3:
+                col, row = pos, 0
+            else:
+                col, row = pos - 3, 2
+            rect = pygame.Rect(col * fw, row * fh, fw, fh)
+            return get_frame_nobg(sheet, rect, tolerance=30)
+
+        else:  # pleakley
+            # sprint3.png: 6 frames em 1 linha, fundo branco
+            sheet = get_sprite_sheet('sprint3.png')
+            if sheet is None: return None
+            sw, sh = sheet.get_size()
+            fw = sw // 6
+            idx = (self.frame // 7) % 6
+            rect = pygame.Rect(idx * fw, 0, fw, sh)
+            return get_frame_nobg(sheet, rect, tolerance=30)
+
     def draw(self, surf):
-        bob = math.sin(self.frame * 0.2) * 3
-        c = RED if self.kind == 'gantu' else (118,58,158) if self.kind == 'jumba' else (55,158,55)
-        pygame.draw.ellipse(surf, c, (self.x - 12, self.y - 12 + bob, 24, 28))
-        pygame.draw.circle(surf, WHITE, (self.x-5, self.y-5+bob), 4)
-        pygame.draw.circle(surf, WHITE, (self.x+5, self.y-5+bob), 4)
+        bob = math.sin(self.frame * 0.15) * 2
+        frame_surf = self._get_sprite_frame()
+
+        if frame_surf is not None:
+            target_w, target_h = 55, 55
+            scaled = pygame.transform.smoothscale(frame_surf, (target_w, target_h))
+            # Espelha se indo para a esquerda
+            if self.dx < 0:
+                scaled = pygame.transform.flip(scaled, True, False)
+            r = scaled.get_rect(center=(int(self.x), int(self.y + bob)))
+            surf.blit(scaled, r)
+        else:
+            # Fallback: elipse colorida caso o sprite não carregue
+            c = RED if self.kind == 'gantu' else (118,58,158) if self.kind == 'jumba' else (55,158,55)
+            pygame.draw.ellipse(surf, c, (self.x - 12, self.y - 12 + bob, 24, 28))
+            pygame.draw.circle(surf, WHITE, (self.x-5, self.y-5+bob), 4)
+            pygame.draw.circle(surf, WHITE, (self.x+5, self.y-5+bob), 4)
 
 # ═══════════════════════════════════════════════════════════════════════════════
 # OBJECTS (sem glow)
@@ -437,6 +670,10 @@ def main():
     flash_msg = ""
     found_obj = ""
 
+    # Pré-carrega todos os frames dos inimigos (evita travamento no início)
+    preload_enemy_sprites()
+    pygame.event.clear()  # descarta eventos acumulados durante o loading
+
     def reset_positions():
         player.x = lvl.player_start[0]*TILE + TILE//2
         player.y = lvl.player_start[1]*TILE + TILE//2 + HUD_H
@@ -506,8 +743,9 @@ def main():
         # Enemies — pass player position so Gantu can chase
         player_pos = (player.x, player.y)
         for e in lvl.enemies:
-            e.speed = 2 + (level_num * 0.5)
-            e.update(lvl.walls, player_pos)
+            other_enemies = [o for o in lvl.enemies if o != e]
+            e.speed = 2 + (level_num - 1) * 0.3
+            e.update(lvl.walls, player_pos, other_enemies)
             e.draw(screen)
             if player.rect().colliderect(e.rect()):
                 player.lives -= 1
